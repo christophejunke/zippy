@@ -42,6 +42,10 @@
   ;; decode.lisp
   (:export
    #:archive-file-required
+   #:unknown-extra-field
+   #:unknown-extra-field-id
+   #:unknown-extra-field-size
+   #:unknown-extra-field-data
    #:disk
    #:decode-file
    #:with-zip-file

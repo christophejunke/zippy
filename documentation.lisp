@@ -101,6 +101,25 @@ See DISK
 See DECODE-FILE
 See DECODE-ENTRY")
 
+  (type unknown-extra-field
+    "Condition signalled if an unknown extra field is being decoded.
+
+This condition is silently emitted by DECODE-EXTRA-FIELD whenever the
+identifier of the extra field is unknown. The field can be registered
+by using DEFINE-BYTE-STRUCTURE.
+
+Alternatively, when this condition is signalled, a USE-VALUE restart
+is available to provide decoded extra fields using a different
+mechanism. There is also an IGNORE restart available to skip this
+field.
+
+The DATA slot is a displaced array, its content should only be
+considered valid during the extent of a signal handler.
+
+See DECODE-EXTRA-FIELD
+See DECODE-EXTRA-FIELDS
+See DECODE-ENTRY")
+
   (function with-zip-file
     "Open a zip file lexically and cleans up on exit.
 

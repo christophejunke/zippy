@@ -5,19 +5,71 @@
   (:report (lambda (c s) (format s "Disk ~a is required to continue reading the Zip file."
                                  (disk c)))))
 
-(defun decode-extra-fields (vector)
-  (let ((fields ()))
-    (loop with index = 0
-          while (< index (length vector))
-          do (let* ((sig (nibbles:ub16ref/le vector index))
-                    (dec (gethash sig *structures*)))
-               (incf index 2)
-               (when dec
-                 (push (funcall (first dec) vector index) fields))
-               (if (< index (length vector))
-                   (incf index (+ 2 (nibbles:ub16ref/le vector index)))
-                   (return))))
-    (nreverse fields)))
+(define-condition unknown-extra-field ()
+  ((id :initarg :id :accessor unknown-extra-field-id)
+   (size :initarg :size :accessor unknown-extra-field-size)
+   (data :initarg :data :accessor unknown-extra-field-data))
+  (:report (lambda (condition stream)
+             (with-slots (id size data) condition
+               (format stream
+                       "Unknown extra field #x~x (size=~2,'0d): ~s"
+                       id size data)))))
+
+(defun check-extra-field-data (vector index)
+  (unless (< (+ index 4) (length vector))
+    (let ((garbage (subseq vector index)))
+      (error "Garbage at end of extra field vector: ~s" garbage))))
+
+(defun decode-extra-field (vector index)
+  "Decode extra field from vector at index, return also next index."
+  (restart-case (check-extra-field-data vector index)
+    (ignore ()
+      :report "Ignore remaining data in vector"
+      (return-from decode-extra-field (values nil (length vector)))))
+  (flet ((read-u16 ()
+           (nibbles:ub16ref/le vector (shiftf index (+ index 2))))
+         (slice (start size)
+           (make-array size
+                       :displaced-to vector
+                       :displaced-index-offset start
+                       :element-type (array-element-type vector))))
+    (declare (inline read-u16 slice))
+    (let* (;; field identifier
+           (sig (read-u16))
+           ;; data size
+           (size (read-u16))
+           ;; next index
+           (next (+ index size))
+           ;; decoder function
+           (decoder (first (gethash sig *structures*))))
+      (values (restart-case (if decoder
+                                ;; decoder functions want to read SIZE too
+                                (funcall decoder vector (- index 2))
+                                (signal 'unknown-extra-field
+                                        :id sig
+                                        :size size
+                                        :data (slice index size)))
+                (ignore ()
+                  :report "Ignore this extra field ~s" (slice index size))
+                (use-value (value)
+                  :report "Use given value"
+                  value))
+              ;; return next index
+              next))))
+
+(defun decode-extra-fields (vector &aux fields (index 0))
+  (loop
+    (multiple-value-bind (field next-index) (decode-extra-field vector index)
+      (when field
+        (push field fields))
+      (unless (< next-index (length vector))
+        (return (nreverse fields)))
+      (setf index next-index))))
+
+(define-byte-structure (data-descriptor #x5455)
+  (crc-32 ub32)
+  (compressed-size ub32)
+  (uncompressed-size ub32))
 
 (defun process-extra-field (entry field)
   (typecase field
@@ -137,7 +189,7 @@
                 (setf cd-end-disk (end-of-central-directory/64-number-of-disk eocd))
                 (setf entries (make-array (end-of-central-directory/64-central-directory-entries eocd)
                                           :initial-element NIL :adjustable T :fill-pointer T)))
-              (warn "File appears corrupted: 
+              (warn "File appears corrupted:
 
 Zip64 End of Central Directory Record was not at indicated position.
 Will attempt to continue with 32 bit standard central directory."))))
